@@ -154,6 +154,60 @@ git count-objects -vH      # → size: 1.45 KiB
 1.45 KiB confirms `.venv` was not included. Had it been, this would read in the
 hundreds of megabytes.
 
+### 9. Line endings and `.gitattributes`
+
+Adding files produced a warning: `LF will be replaced by CRLF the next time Git
+touches it`. Windows writes line endings as two characters (CRLF), Unix as one
+(LF); git on Windows converts to LF on commit and back on checkout. The warning
+is informational, not an error.
+
+To make the behaviour explicit and silence it:
+
+```bash
+cat > .gitattributes << 'EOF'
+* text=auto eol=lf
+*.png binary
+*.parquet binary
+*.duckdb binary
+EOF
+```
+
+The binary declarations matter: if git treated a Parquet file as text and
+rewrote its line endings, the file would be corrupted.
+
+### 10. Removing a file after it was committed
+
+The Persian-language copy of this log was committed, then deleted from disk.
+`git status` reported it under *Changes not staged for commit*, because a
+deletion is itself a change and must be staged like any other.
+
+```bash
+git add -A      # -A includes deletions; plain `git add .` may not
+git commit -m "Remove Persian setup log from repository"
+```
+
+Note that the file remains in *history*. For a document this is irrelevant, but
+it is the same mechanism by which a large data file committed once keeps a
+repository bloated forever — which is why `.gitignore` was written before the
+first commit.
+
+### 11. Rename the default branch
+
+```bash
+git branch -M main
+```
+
+Git historically creates `master`; GitHub and most current tooling expect `main`.
+Renaming before any push is free; renaming after a push is not.
+
+### 12. Final verification
+
+```bash
+git ls-files
+```
+
+Eleven tracked files, and nothing from `.venv/` or `data/raw/`:
+
 ---
 
 ## Problems encountered and how they were resolved
@@ -213,23 +267,28 @@ euro-area-macro-monitor/
 ├── .gitignore
 ├── README.md
 ├── requirements.txt
-└── requirements.lock.txt
+├── requirements.lock.txt
+└── .gitattributes
+
 ```
 
-Phase 0 complete: one local commit, repository size 1.45 KiB.
 
 ---
 
+## Phase 0 complete
+
+Three commits on `main`, eleven tracked files, repository under 2 KiB.
+Not yet pushed to a remote.
+
 ## Next steps
 
-1. Create the GitHub repository — **without** a README, `.gitignore`, or licence,
-   since the local repo already has them and git would otherwise report a conflict
-   on the first push.
-2. ```bash
+1. Push to GitHub. Create the repository **without** a README, `.gitignore`, or
+   licence, since the local repo already has them.
+```bash
    git remote add origin https://github.com/USERNAME/euro-area-macro-monitor.git
-   git branch -M main
    git push -u origin main
-   ```
+```
+2. Obtain a FRED API key from `fred.stlouisfed.org` (free, needed in phase 3).
 3. Phase 1: first API connection (ECB, no key required) — one indicator, one
-   DataFrame. Acceptance test: a table with a date column and a value column is
-   returned.
+   DataFrame. Acceptance test: a table with a date column and a value column.
+

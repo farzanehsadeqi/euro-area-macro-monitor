@@ -3,7 +3,7 @@
 __pycache__/
 *.py[cod]
 .pythest_cache/
-*.egg_info/
+**/*.egg-info/
 
 # Secrets
 .env
