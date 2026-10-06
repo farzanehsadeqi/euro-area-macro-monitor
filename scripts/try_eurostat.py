@@ -1,8 +1,26 @@
-"""Test the eurostat module."""
+"""Find the valid geo codes for une_rt_m."""
 
-from monitor.sources.eurostat import fetch_dataset
+import requests
 
-df = fetch_dataset("prc_hicp_manr", geo="EA20", coicop="CP00", unit="RCH_A")
+url = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/une_rt_m"
 
-print("Rows:", len(df))
-print(df.tail())
+# No geo filter at all, so we see every available area
+params = {
+    "format": "JSON",
+    "lang": "EN",
+    "s_adj": "SA",
+    "age": "TOTAL",
+    "sex": "T",
+    "unit": "PC_ACT",
+    "lastTimePeriod": 1,
+}
+
+response = requests.get(url, params=params, timeout=30)
+data = response.json()
+
+geo = data["dimension"]["geo"]["category"]
+print("Number of areas:", len(geo["index"]))
+print()
+
+for code, label in geo["label"].items():
+    print(f"{code}: {label}")
