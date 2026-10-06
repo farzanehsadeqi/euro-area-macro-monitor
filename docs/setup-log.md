@@ -280,15 +280,160 @@ euro-area-macro-monitor/
 Three commits on `main`, eleven tracked files, repository under 2 KiB.
 Not yet pushed to a remote.
 
-## Next steps
+# Phase 1 — First API Connection
 
-1. Push to GitHub. Create the repository **without** a README, `.gitignore`, or
-   licence, since the local repo already has them.
+Goal: fetch one indicator from one source and return a tidy DataFrame.
+Source: ECB Data Portal (SDMX 2.1 REST API, no key required).
+
+---
+
+## What was built
+
+### 1. `pyproject.toml` — making the project installable
+
 ```bash
-   git remote add origin https://github.com/USERNAME/euro-area-macro-monitor.git
-   git push -u origin main
+pip install -e .
 ```
-2. Obtain a FRED API key from `fred.stlouisfed.org` (free, needed in phase 3).
-3. Phase 1: first API connection (ECB, no key required) — one indicator, one
-   DataFrame. Acceptance test: a table with a date column and a value column.
+
+`-e` means editable: the code is read from `src/` directly, so changes take
+effect immediately without reinstalling.
+
+This is the clean solution to import paths — the alternative is `sys.path`
+manipulation inside every script, which breaks as soon as a file moves.
+`where = ["src"]` tells setuptools that only `src/` contains package code,
+which is why throwaway scripts live in a separate top-level `scripts/`
+directory rather than inside the package.
+
+### 2. `src/monitor/http.py` — shared HTTP layer
+
+One `get()` function with retries, exponential backoff, a timeout, and a
+descriptive User-Agent. Deliberately separate from any data source, so all
+three sources share one implementation: adding throttling later means
+changing one place, not three.
+
+Three decisions worth recording:
+
+- **Retries only on transient failures.** A 404 means the URL is wrong and
+  repeating it will not help; a 503 means the server is briefly busy and
+  retrying is reasonable. `RETRY_ON = {429, 500, 502, 503, 504}`.
+- **Honours `Retry-After`.** When a server returns 429 it usually states in a
+  header how long to wait. Respecting it is the difference between a polite
+  client and a blocked one.
+- **`timeout` is mandatory.** Without it `requests` can wait indefinitely and
+  silently hang a scheduled overnight run.
+
+### 3. `src/monitor/sources/ecb.py` — first data source
+
+https://data-api.ecb.europa.eu/service/data/%7Bflow%7D/%7Bkey%7D?format=csvdata
+
+
+On the ECB portal a series is written `EXR.D.USD.EUR.SP00.A`, where `EXR` is
+the *dataflow* and `D.USD.EUR.SP00.A` is the *series key* — they go in
+different parts of the URL. Optional `startPeriod` / `endPeriod` parameters
+restrict the range.
+
+The response columns are validated before use:
+
+```python
+expected = {"TIME_PERIOD", "OBS_VALUE"}
+missing = expected - set(raw.columns)
+if missing:
+    raise ValueError(...)
+```
+
+This is the same discipline as `stopifnot()`: if the API ever changes its
+response shape, the script fails with a clear message instead of silently
+returning an empty table.
+
+Output contract, the same for every source: columns `date`, `value`,
+`series_key`.
+
+### 4. `scripts/demo_ecb.py` — smoke test
+
+Acceptance test passed: 706 rows, 2024-01-02 to 2026-10-06, EUR/USD values
+in the expected 1.0–1.2 range, weekdays only.
+
+---
+
+## Problems encountered
+
+### Problem 1 — `pip install -e .` run from the wrong directory
+
+ERROR: file:///C:/Users/farza does not appear to be a Python project
+
+
+The terminal was in the home directory, not the project. Fixed with `cd`.
+
+This is exactly the failure mode the phase 0 log warned about: **run `pwd`
+before any command that creates files or acts on the current directory.**
+
+### Problem 2 — `scripts/` created inside `src/`
+
+`find . -name "*.py" -not -path "./.venv/*"` revealed the script at
+`./src/scripts/demo_ecb.py` instead of `./scripts/demo_ecb.py`.
+
+```bash
+mkdir -p scripts
+mv src/scripts/demo_ecb.py scripts/
+rmdir src/scripts
+```
+
+Not merely cosmetic: `pyproject.toml` declares `where = ["src"]`, so anything
+under `src/` is treated as part of the installable package. Development
+scripts are tooling, not library code, and the separation keeps that boundary.
+
+`find` with `-not -path "./.venv/*"` is the quick way to see the real project
+structure without the noise of the virtual environment.
+
+### Problem 3 — `ModuleNotFoundError: No module named 'monitor'`
+
+The virtual environment was not active in that terminal, so the system Python
+ran instead — and it has no `monitor` installed.
+
+```bash
+source .venv/Scripts/activate
+python -c "import sys; print(sys.prefix)"   # must point inside the project
+```
+
+**A new terminal does not activate the virtual environment by itself.** Either
+activate it each time, or configure the editor to select the project
+interpreter automatically (VS Code: `Ctrl+Shift+P` → `Python: Select
+Interpreter`).
+
+Diagnostic tip: `(.venv)` appearing in the prompt is the quickest check.
+
+### Problem 4 — `.egg-info` kept appearing in `git status`
+
+`pip install -e .` generates `src/euro_area_macro_monitor.egg-info/`, package
+metadata that is regenerated on any machine and must not be committed.
+
+The root cause turned out to be two typos in `.gitignore`: `egg_info` with an
+underscore instead of a hyphen, and `.pythest_cache/` instead of
+`.pytest_cache/`.
+
+```bash
+sed -i 's|egg_info|egg-info|; s|pythest|pytest|' .gitignore
+```
+
+**`.gitignore` is completely silent about typos.** A pattern matching nothing
+raises no error — it simply has no effect. The diagnostic tool is:
+
+```bash
+git check-ignore -v path/to/thing
+```
+
+It reports which line of `.gitignore` is responsible for ignoring a path. No
+output means no pattern matches it at all.
+
+A related subtlety: `*.egg-info/` only matches at the repository root. Use
+`**/*.egg-info/` to match at any depth.
+
+---
+
+## Phase 1 complete
+
+Commit: `Add HTTP layer and ECB data source; complete phase 0 log`
+
+New files: `pyproject.toml`, `src/monitor/http.py`,
+`src/monitor/sources/ecb.py`, `scripts/demo_ecb.py`.
 
