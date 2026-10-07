@@ -9,14 +9,16 @@ import pandas as pd
 BASE_URL = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
 
 
-def fetch_dataset(dataset, **filters):
+def fetch_dataset(dataset, start=None, **filters):
     """Fetch one Eurostat dataset.
 
     Returns a DataFrame with columns: date, value, series_key.
     """
     url = f"{BASE_URL}/{dataset}"
     params = {"format": "JSON", "lang": "EN", **filters}
-
+    if start:
+        params["sinceTimePeriod"] = start[:7]   # Eurostat wants YYYY-MM
+        
     response = requests.get(url, params=params, timeout=30)
     response.raise_for_status()
     data = response.json()

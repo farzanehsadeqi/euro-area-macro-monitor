@@ -15,7 +15,7 @@ def fetch_one(item, start=None):
     if source == "ecb":
         df = ecb.fetch_series(item["flow"], item["key"], start=start)
     elif source == "eurostat":
-        df = eurostat.fetch_dataset(item["dataset"], **item["filters"])
+        df = eurostat.fetch_dataset(item["dataset"], start=start, **item["filters"])
     elif source == "fred":
         df = fred.fetch_series(item["series_id"], start=start)
     else:
@@ -30,19 +30,32 @@ def fetch_one(item, start=None):
     return df
 
 
-def fetch_all(start=None):
-    """Fetch every configured series and stack them into one table."""
+def fetch_all(start=None, last_dates=None):
+    """Fetch every configured series.
+
+    If last_dates is given, each series is fetched only from the day after
+    its most recent stored observation.
+    """
+    last_dates = last_dates or {}
     frames = []
 
     for item in SERIES:
+        name = item["name"]
+
+        # Resume from where this series left off, if we have it
+        if name in last_dates:
+            resume_from = (last_dates[name] + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            resume_from = start
+
         try:
-            df = fetch_one(item, start=start)
-            print(f"{item['name']}: {len(df)} rows")
+            df = fetch_one(item, start=resume_from)
+            print(f"{name}: {len(df)} rows (from {resume_from})")
             frames.append(df)
         except Exception as exc:
-            print(f"{item['name']}: FAILED — {exc}")
+            print(f"{name}: FAILED — {exc}")
 
     if not frames:
-        raise RuntimeError("No series could be fetched.")
+        return pd.DataFrame()
 
     return pd.concat(frames, ignore_index=True)
