@@ -821,3 +821,346 @@ The pipeline now: keeps configuration separate from code, reads three APIs with
 three different response formats, stores results in compressed columnar format,
 records data vintage, fetches only new observations on subsequent runs, and is
 queryable with SQL.
+
+
+
+
+# Phase 4 — Scheduled Automation
+
+Goal: run the pipeline every day without manual intervention.
+
+---
+
+## Design decision — commit the data, or keep it as an artifact?
+
+Two options were weighed.
+
+**(a) The action commits updated data back to the repository.** The repo always
+shows current data and the activity graph makes it visible that the project is
+alive. Cost: one commit per run.
+
+**(b) The action runs and stores results as a workflow artifact.** Git history
+stays clean, but the committed data goes stale, artifacts expire after about
+90 days, and anyone evaluating the repo never sees them. Worse, each run would
+start from scratch, which makes the incremental loading logic pointless.
+
+**(a) was chosen.** The scale settles it: 64 KB per day is roughly 23 MB a
+year, well within normal GitHub limits. For a portfolio repository, a project
+that updates itself daily is far more informative than one that does not.
+
+---
+
+## What was built
+
+### Secret handling
+
+`.env` exists only on the local machine. The action runs on GitHub's servers,
+so the FRED key was added under **Settings → Secrets and variables → Actions**
+as `FRED_API_KEY`, and injected into the run:
+
+```yaml
+env:
+  FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+```
+
+Once saved, GitHub never displays the value again — it can only be replaced.
+The same code reads it via `os.getenv` in both environments, which is exactly
+why `python-dotenv` was preferred over an editor setting back in phase 2.
+
+### `.github/workflows/daily-update.yml`
+
+```yaml
+on:
+  schedule:
+    - cron: "0 6 * * *"      # 06:00 UTC daily
+  workflow_dispatch:          # manual run button in the Actions tab
+```
+
+`workflow_dispatch` matters during development: without it there is no way to
+test the workflow except by waiting until tomorrow.
+
+```yaml
+permissions:
+  contents: write
+```
+
+Required, or the final push step fails with a permissions error.
+
+```yaml
+git add data/processed/
+if git diff --staged --quiet; then
+  echo "No changes to commit."
+else
+  git commit -m "Data update $(date -u +'%Y-%m-%d')"
+  git push
+fi
+```
+
+The condition was meant to keep history clean on days with nothing new.
+
+---
+
+## Problems encountered
+
+### Non-issue — Node.js deprecation warning
+
+> Node.js 20 is deprecated. The following actions target Node.js 20 but are
+> being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5
+
+A warning, not an error — GitHub substitutes the newer runtime automatically.
+Resolved anyway by moving to `actions/checkout@v5` and `actions/setup-python@v6`.
+
+### Problem — the "no changes" condition never triggered
+
+The first automated run produced:
+
+```
+[main 6a9c92a] Data update 2026-10-07
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+```
+
+A commit with zero line changes. The cause: **Parquet is a binary file.** Git
+cannot diff it line by line, it only sees that the bytes differ — and they
+differed because `vintage_date` was being refreshed on every row on every run,
+including observations that had not changed at all.
+
+So the guard was dead code, and the repository would gain a commit every single
+day regardless of whether any new data existed.
+
+**The fix was conceptual rather than mechanical.** `vintage_date` should mean
+*when this figure was published*, not *when we last downloaded it*. Two-stage
+deduplication in `storage.save()`:
+
+```python
+# If date and value are both unchanged, keep the original vintage_date:
+# the figure was not revised, we merely downloaded it again.
+combined = combined.drop_duplicates(
+    subset=["series_key", "date", "value"], keep="first"
+)
+
+# Of what remains, a repeated date means the value was revised,
+# so keep the most recent vintage.
+combined = (
+    combined
+    .sort_values("vintage_date")
+    .drop_duplicates(subset=["series_key", "date"], keep="last")
+    ...
+)
+```
+
+Note `keep="first"` in the first pass and `keep="last"` in the second — that
+asymmetry is the whole point. Verified: after the fix, re-running the pipeline
+left the Parquet file untouched in `git status`.
+
+### New habit — `git pull` before working
+
+Once the action commits from the server side, the remote can be ahead of the
+local clone. Forgetting this produces:
+
+```
+! [rejected] main -> main (non-fast-forward)
+```
+
+Harmless, but the workflow now starts with `git pull`.
+
+A related surprise: `git pull` can open Vim to confirm a merge message. `Esc`
+then `:wq` then Enter saves and exits; `:q!` aborts the merge.
+
+---
+
+## Phase 4 complete
+
+The pipeline runs daily on GitHub's servers, reads its API key from Secrets,
+and commits only when data genuinely changes.
+
+---
+
+# Phase 5 — Outputs
+
+Goal: make the repository legible to someone who looks at it for thirty seconds.
+
+---
+
+## What was built
+
+### `scripts/make_charts.py`
+
+One PNG per series, written to `output/`.
+
+```python
+import matplotlib
+matplotlib.use("Agg")          # must come BEFORE importing pyplot
+import matplotlib.pyplot as plt
+```
+
+**`Agg` is not cosmetic.** GitHub's runners have no display. Without this
+backend, matplotlib tries to open a window and the scheduled run fails. The
+ordering matters too — it has to be set before `pyplot` is imported.
+
+`plt.close(fig)` after each save prevents matplotlib from accumulating every
+figure in memory.
+
+### Charts are committed
+
+`output/` was gitignored, which would have made the charts invisible on GitHub —
+useless for a portfolio. Resolved with a negation, the same pattern as
+`output/.gitkeep` in phase 0:
+
+```
+output/*
+!output/.gitkeep
+!output/*.png
+```
+
+### `scripts/make_readme.py`
+
+Regenerates `README.md` from the stored data: a table of every indicator with
+its source, frequency, latest date and latest value, plus embedded charts and a
+UTC timestamp.
+
+The coverage caveat discovered in phase 3 is written into the README
+deliberately, not hidden:
+
+> `hicp_euro_area` uses the EA20 aggregate (20 countries) while
+> `unemployment_euro_area` uses EA21 (21 countries). Eurostat does not update
+> area codes across all datasets simultaneously, so the two series do not cover
+> an identical population.
+
+### Wired into the workflow
+
+```yaml
+- name: Rebuild charts
+  run: python scripts/make_charts.py
+
+- name: Rebuild README
+  run: python scripts/make_readme.py
+```
+
+and the commit step extended to `git add data/processed/ output/ README.md`.
+
+One accepted consequence: the README carries a timestamp, so it changes on
+every run and therefore produces a daily commit even when the data has not
+moved. Kept on purpose — it signals an active project.
+
+---
+
+## Sanity check
+
+The charts were read against known economic history rather than merely
+inspected for prettiness: the ECB policy rate flat at zero from 2016 to 2022
+then stepping sharply upward, the Fed funds rate collapsing in early 2020, the
+EUR/USD trough in late 2022. All consistent.
+
+Worth keeping as a habit — a chart that renders is not the same as a chart that
+is correct.
+
+---
+
+# Phase 6 — Consolidation
+
+Goal: pay off the debts recorded in earlier phases.
+
+---
+
+## What was done
+
+### Retry layer restored, this time for all three sources
+
+Phase 3 had simplified `ecb.py` to call `requests` directly, which left
+`src/monitor/http.py` as dead code and removed the retry logic that had been
+absorbing intermittent DNS failures.
+
+`http.py` was rewritten in a simpler form and all three source modules now go
+through it:
+
+```python
+from monitor.http import get
+...
+response = get(url, params=params)
+```
+
+Retries happen on network exceptions and on `{429, 500, 502, 503, 504}`, but
+not on 400 or 404 — those will not fix themselves and are handled by the caller.
+
+### Scratch scripts removed
+
+Six throwaway debugging scripts (`try_*.py`, `check_*.py`, `demo_ecb.py`) were
+deleted. Four remain, all of which do real work: `run_pipeline.py`,
+`make_charts.py`, `make_readme.py`, `query_duckdb.py`.
+
+---
+
+## Problems encountered
+
+### Problem 1 — `name 'requests' is not defined`
+
+The `import requests` line had been removed from the source modules but the
+`requests.get(...)` calls had not been replaced. Found quickly with a
+project-wide search for `requests` — it should now appear only in `http.py`.
+
+### Problem 2 — a third ECB edge case
+
+```
+eur_usd: FAILED — No columns to parse from file
+```
+
+Phase 3 had handled HTTP 400 for an empty range. This was different: **HTTP 200
+with an empty body.** The pipeline asked for data starting today, and today's
+figure had not yet been published.
+
+```python
+response.raise_for_status()
+
+# A successful but empty response means no data in the requested range
+if not response.text.strip():
+    return pd.DataFrame(columns=["date", "value", "series_key"])
+```
+
+So one API returns three distinct shapes for "nothing to give you":
+
+| Situation | Response |
+|---|---|
+| `startPeriod` in the future | HTTP 400 |
+| Valid range, no observations yet | HTTP 200, empty body |
+| Normal | HTTP 200, CSV |
+
+Each needs separate handling. No tutorial mentions this; it only surfaces from
+building something real and running it on consecutive days.
+
+---
+
+## Project complete
+
+| Capability | Where |
+|---|---|
+| Configuration separate from code | `src/monitor/config.py` |
+| Three APIs, three response formats | `src/monitor/sources/` |
+| Shared HTTP layer with retries | `src/monitor/http.py` |
+| Columnar storage with data vintages | `src/monitor/storage.py` |
+| Incremental loading | `fetch_all(last_dates=...)` |
+| SQL queries on a file | `scripts/query_duckdb.py` |
+| Charts and generated README | `scripts/make_charts.py`, `make_readme.py` |
+| Daily scheduled run | `.github/workflows/daily-update.yml` |
+
+---
+
+## What this project taught, beyond the code
+
+**Ask the tool, do not guess.** `git check-ignore -v` names the pattern
+responsible for ignoring a path. Eurostat's `dimension` section lists which
+filter values are valid. Both saved time that guessing would have burned.
+
+**Silent failures are the dangerous ones.** A `.gitignore` typo raises no error.
+A binary diff reports zero line changes. An unhandled empty response parses as
+a crash three steps later. The recurring defence is to verify explicitly rather
+than assume.
+
+**Edge cases come from running something twice, not from writing it once.** The
+incremental logic looked finished until the second run, and the empty-response
+case only appeared on the following day.
+
+## Remaining optional work
+
+- Unit tests with `pytest` — deliberately deferred, since tests hitting live
+  APIs are fragile in CI; tests against stored fixtures would be the right shape.
+- Align the Eurostat `start` handling fully with the other two sources.
