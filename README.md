@@ -3,7 +3,7 @@
 Automated ETL pipeline collecting macro and financial indicators from the
 ECB Data Portal, Eurostat, and FRED. Runs daily via GitHub Actions.
 
-**Last updated:** 2026-10-07 21:58 UTC
+**Last updated:** 2026-10-07 22:09 UTC
 **Observations stored:** 8,211
 
 ## Indicators
