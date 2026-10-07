@@ -15,4 +15,5 @@ data/raw/
 
 # Generated output
 output/*
+!output/*.png
 !output/.gitkeep

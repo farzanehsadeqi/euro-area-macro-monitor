@@ -1,21 +1,48 @@
-# Euro Area Macro Monitor
+"""Regenerate README.md with the latest data summary."""
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pandas as pd
+
+df = pd.read_parquet("data/processed/observations.parquet")
+
+latest = (
+    df.sort_values("date")
+      .groupby(["series_key", "source", "frequency"], as_index=False)
+      .last()[["series_key", "source", "frequency", "date", "value"]]
+      .sort_values("series_key")
+)
+
+rows = []
+for _, r in latest.iterrows():
+    rows.append(
+        f"| `{r['series_key']}` | {r['source']} | {r['frequency']} | "
+        f"{r['date'].date()} | {r['value']:,.4g} |"
+    )
+
+table = "\n".join(rows)
+charts = "\n\n".join(
+    f"### {r['series_key'].replace('_', ' ')}\n\n"
+    f"![{r['series_key']}](output/{r['series_key']}.png)"
+    for _, r in latest.iterrows()
+)
+
+stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+readme = f"""# Euro Area Macro Monitor
 
 Automated ETL pipeline collecting macro and financial indicators from the
 ECB Data Portal, Eurostat, and FRED. Runs daily via GitHub Actions.
 
-**Last updated:** 2026-10-07 21:58 UTC
-**Observations stored:** 8,211
+**Last updated:** {stamp}
+**Observations stored:** {len(df):,}
 
 ## Indicators
 
 | Series | Source | Frequency | Latest date | Latest value |
 |---|---|---|---|---|
-| `ecb_policy_rate` | ecb | daily | 2026-10-07 | 2.65 |
-| `eur_usd` | ecb | daily | 2026-10-07 | 1.118 |
-| `hicp_euro_area` | eurostat | monthly | 2025-12-01 | 2 |
-| `unemployment_euro_area` | eurostat | monthly | 2026-08-01 | 6.4 |
-| `us_cpi` | fred | monthly | 2026-08-01 | 334.1 |
-| `us_fed_funds_rate` | fred | monthly | 2026-09-01 | 3.75 |
+{table}
 
 Note on coverage: `hicp_euro_area` uses the EA20 aggregate (20 countries) while
 `unemployment_euro_area` uses EA21 (21 countries). Eurostat does not update
@@ -53,31 +80,13 @@ The ECB and Eurostat sources need no key.
 
 ## Charts
 
-### ecb policy rate
-
-![ecb_policy_rate](output/ecb_policy_rate.png)
-
-### eur usd
-
-![eur_usd](output/eur_usd.png)
-
-### hicp euro area
-
-![hicp_euro_area](output/hicp_euro_area.png)
-
-### unemployment euro area
-
-![unemployment_euro_area](output/unemployment_euro_area.png)
-
-### us cpi
-
-![us_cpi](output/us_cpi.png)
-
-### us fed funds rate
-
-![us_fed_funds_rate](output/us_fed_funds_rate.png)
+{charts}
 
 ## Development log
 
 See [docs/setup-log.md](docs/setup-log.md) for the build history, design
 decisions, and problems encountered.
+"""
+
+Path("README.md").write_text(readme, encoding="utf-8")
+print(f"README.md updated ({len(readme)} characters)")
