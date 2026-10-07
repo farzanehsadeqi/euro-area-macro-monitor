@@ -1,0 +1,44 @@
+name: Daily data update
+
+on:
+  schedule:
+    - cron: "0 6 * * *"      # 06:00 UTC every day
+  workflow_dispatch:          # lets you run it manually from the Actions tab
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write         # needed to push the updated data back
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run the pipeline
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: python scripts/run_pipeline.py
+
+      - name: Commit updated data if it changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/processed/
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Data update $(date -u +'%Y-%m-%d')"
+            git push
+          fi
