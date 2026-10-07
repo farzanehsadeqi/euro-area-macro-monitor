@@ -29,7 +29,14 @@ def save(new_rows, existing):
     else:
         combined = pd.concat([existing, new_rows], ignore_index=True)
 
-    # Keep the most recent vintage when the same observation appears twice
+    # If date and value are both unchanged, keep the original vintage_date:
+    # the figure was not revised, we merely downloaded it again.
+    combined = combined.drop_duplicates(
+        subset=["series_key", "date", "value"], keep="first"
+    )
+
+    # Of what remains, a repeated date means the value was revised,
+    # so keep the most recent vintage.
     combined = (
         combined
         .sort_values("vintage_date")
