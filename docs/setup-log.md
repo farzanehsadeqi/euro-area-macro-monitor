@@ -582,9 +582,11 @@ plus throwaway test scripts.
 
 ---
 
+
 # Phase 3 — Configuration and Storage
 
-Goal: declare what to collect in one place, fetch it all, and store it properly.
+Goal: declare what to collect in one place, fetch it all, store it properly,
+and on a second run fetch only what is new.
 
 ---
 
@@ -593,8 +595,8 @@ Goal: declare what to collect in one place, fetch it all, and store it properly.
 ### `src/monitor/config.py` — separating configuration from logic
 
 A list of dictionaries, one per indicator, each stating its source and the
-parameters that source needs. Adding a new indicator is now a matter of adding
-one entry — no code changes.
+parameters that source requires. Adding a new indicator is now one entry in a
+list; no code changes.
 
 Six indicators: EUR/USD, ECB policy rate, euro area HICP inflation, euro area
 unemployment, US CPI, US federal funds rate.
@@ -602,38 +604,85 @@ unemployment, US CPI, US federal funds rate.
 ### `src/monitor/pipeline.py` — fetch everything
 
 `fetch_one()` dispatches on the `source` field; `fetch_all()` loops over the
-config and stacks the results with `pd.concat`.
+config and stacks results with `pd.concat`.
 
 Three columns are added at this stage:
 
-- `series_key` is **overwritten** with our own readable name (`eur_usd` rather
-  than `EXR.D.USD.EUR.SP00.A`). The original API code stays in `config.py`.
+- `series_key` is **overwritten** with a readable name (`eur_usd` rather than
+  `EXR.D.USD.EUR.SP00.A`). The original API code stays in `config.py`.
 - `source` and `frequency` carry metadata into the table.
 - `vintage_date` records when the data was retrieved.
 
 **Why `vintage_date` matters:** Eurostat revises published statistics. Without
-this column, if the April inflation figure is corrected next month, the history
-changes silently and there is no way to answer "what number was published at
-the time?"
+it, a correction to the April inflation figure would silently rewrite history
+and there would be no way to answer "what number was published at the time?"
 
-The loop wraps each fetch in `try / except` so that one failing series does not
-abort the whole run — the same logic as `tryCatch` inside a loop in the course
-module on scraping.
+Its value became visible immediately. In the final run every row carries
+`vintage_date = 2026-10-07`, including observations dated December 2025. That
+lets the store answer: *on 7 October 2026, the most recent published inflation
+figure was for December 2025, and it was 2.0.*
 
-### `scripts/run_pipeline.py` — write to Parquet
+Each fetch is wrapped in `try / except` so one failing series does not abort
+the run — the same logic as `tryCatch` inside a loop in the scraping module.
 
-Result: 8,209 rows across six series, written to
-`data/processed/observations.parquet`.
+### `src/monitor/storage.py` — the Parquet store
 
-File size: **64 KB**. The same data as CSV would be roughly half a megabyte —
-about eight times larger. Reading it back also preserves column types, so
-`date` returns as a datetime rather than a string. Both are the advantages of
-columnar storage covered in the course module on large structured data.
+Three functions:
 
-This file **is** committed. It is incremental and compressed, and it is what
-makes the repository reproducible. The DuckDB file, by contrast, will not be
-committed: it is binary and rewritten on every run, so git would store a
-complete new copy each time.
+- `load_existing()` — read what is stored, or an empty frame on first run
+- `last_date_per_series()` — map each series to its most recent date
+- `save()` — combine old and new, deduplicate, write
+
+The deduplication logic is the heart of the module:
+
+```python
+combined
+    .sort_values("vintage_date")
+    .drop_duplicates(subset=["series_key", "date"], keep="last")
+```
+
+If Eurostat revises the April inflation figure, the next run returns that same
+date with a new value and a fresher `vintage_date`. Sorting by vintage and
+keeping the last means **the revised figure replaces the old one** — which is
+the correct behaviour, not merely a tidy-up.
+
+### Incremental loading
+
+`fetch_all()` now accepts `last_dates` and resumes each series from the day
+after its most recent stored observation:
+
+```python
+resume_from = (last_dates[name] + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+```
+
+Result on the second run: **6 rows fetched instead of 8,209.**
+
+### Storage facts
+
+8,209 rows across six series in **64 KB** of Parquet. The same data as CSV
+would be roughly half a megabyte — about eight times larger. Reading it back
+also preserves column types, so `date` returns as a datetime rather than a
+string. Both are the advantages of columnar storage from the large-structured-
+data module.
+
+This file **is** committed: it is incremental, compressed, and is what makes
+the repository reproducible. The DuckDB file is not committed — it is binary
+and rewritten on every run, so git would store a complete new copy each time.
+
+### `scripts/query_duckdb.py` — SQL on a file
+
+```sql
+SELECT series_key, max(date) AS latest_date, arg_max(value, date) AS latest_value
+FROM read_parquet('data/processed/observations.parquet')
+GROUP BY series_key
+```
+
+Note `read_parquet(...)` **inside the SQL**. DuckDB reads the file directly as
+a table — no loading step, no server, no pre-built database. This is "SQL on a
+file" from the course module.
+
+`arg_max(value, date)` returns the value in the row where date is highest — a
+clean way to get the latest observation per series without a subquery.
 
 ---
 
@@ -645,19 +694,14 @@ complete new copy each time.
 NameResolutionError: Failed to resolve 'data-api.ecb.europa.eu'
 ```
 
-Not a code error — DNS resolution failing intermittently on the local network.
-The evidence: a second series using the *same* domain succeeded in the same run.
+Not a code error — intermittent DNS failure on the local network. The evidence:
+a second series using the *same* domain succeeded in the same run.
 
-No fix required. The retry layer built in phase 1 absorbed it, succeeding on
-the second or third attempt. This was the first real-world confirmation that
-the retry logic earns its place.
+No fix required at the time. The retry layer built in phase 1 absorbed it,
+succeeding on the second or third attempt. First real confirmation that the
+retry logic earns its place.
 
-### Problem 2 — Eurostat returned 200 with zero values
-
-```
-Status: 200
-Number of values: 0
-```
+### Problem 2 — Eurostat returned HTTP 200 with zero values
 
 A valid response containing nothing. Rather than guessing which filter was
 wrong, the API was asked what it accepts:
@@ -668,8 +712,6 @@ for dim_name in data["id"]:
     print(f"{dim_name}: {list(categories.keys())}")
 ```
 
-Output:
-
 ```
 s_adj: ['NSA', 'SA', 'TC']
 age:   ['TOTAL', 'Y_LT25', 'Y25-74']
@@ -678,19 +720,20 @@ sex:   ['T', 'M', 'F']
 geo:   []          ← empty
 ```
 
-Every filter was valid except `geo`. Re-querying without a geo filter listed
-the available areas, revealing `EA21` — "Euro area – 21 countries (from 2026)".
+Every filter valid except `geo`. Re-querying with no geo filter listed the
+available areas and revealed `EA21` — "Euro area – 21 countries (from 2026)".
 
-**Geographic codes in official statistics are not stable.** Each change in the
-composition of the euro area creates a new code. This is a strong argument for
-keeping such codes in a configuration file rather than buried in code.
+**Geographic codes in official statistics are not stable.** Each change in euro
+area membership creates a new code. A strong argument for keeping such codes
+in a configuration file rather than buried in code.
+
+The general principle, which also applied to `git check-ignore` in phase 1:
+**ask the tool rather than guessing.**
 
 ### Problem 3 — the two euro area aggregates do not match
 
 Changing the inflation series to `EA21` broke it; that dataset only recognises
-`EA20`. Eurostat does not update area codes across all datasets simultaneously.
-
-So in this project:
+`EA20`. Eurostat does not update area codes across all datasets at once.
 
 | Series | Coverage |
 |---|---|
@@ -698,28 +741,83 @@ So in this project:
 | `unemployment_euro_area` | EA21 — 21 countries |
 
 This does not make the data wrong, but the two series do not cover an identical
-population. Recorded here deliberately rather than ignored, and it should
-appear as a coverage column in the README indicator table.
+population. Recorded deliberately rather than ignored; it belongs as a coverage
+column in the README indicator table.
 
-### Known inconsistency — `start` has no effect on Eurostat
+### Problem 4 — HTTP 400 when the requested range is empty
 
-`fetch_dataset()` takes no `start` argument, so Eurostat series return their
-full history (inflation from 2000) while ECB and FRED series respect the
-requested start date (2015). More data rather than less, so harmless for now,
-but worth aligning later.
+Once incremental loading was working, ECB requests with `startPeriod` set to
+tomorrow returned 400 rather than an empty table.
+
+A genuine edge case that every incremental pipeline meets: **when there is
+nothing to fetch, some APIs return an error rather than an empty result.**
+
+```python
+if response.status_code in (400, 404):
+    return pd.DataFrame(columns=["date", "value", "series_key"])
+response.raise_for_status()
+```
+
+### Problem 5 — Eurostat ignored the start date
+
+`hicp_euro_area` returned all 301 rows despite being asked to resume from
+2025-12-02, because `fetch_dataset()` had no `start` parameter at all.
+
+Harmless (duplicates are dropped) but wasteful: the full history was being
+downloaded every run. Eurostat uses `sinceTimePeriod`, and it expects
+`YYYY-MM`:
+
+```python
+if start:
+    params["sinceTimePeriod"] = start[:7]
+```
+
+### Trade-off accepted — the retry layer was dropped
+
+Simplifying `ecb.py` to use `requests` directly, matching the other two
+sources, meant `src/monitor/http.py` is no longer called by anything.
+
+Two consequences, both deliberate and both to be revisited:
+
+- **Retry logic is gone** — the layer that was absorbing the DNS failures.
+- **`http.py` is dead code.** Keeping code that nothing calls is itself a debt.
+
+The plan is to reintroduce retries once, for all three sources, rather than
+having one source behave differently from the others.
 
 ---
 
-## Phase 3 so far
+## Verification
 
-| Series | Rows | Range |
-|---|---|---|
-| ecb_policy_rate | 4,297 | 2015-01-01 → 2026-10-06 |
-| eur_usd | 3,011 | 2015-01-02 → 2026-10-06 |
-| hicp_euro_area | 301 | 2000-12-01 → 2025-12-01 |
-| unemployment_euro_area | 320 | 2000-01-01 → 2026-08-01 |
-| us_cpi | 139 | 2015-01-01 → 2026-08-01 |
-| us_fed_funds_rate | 141 | 2015-01-01 → 2026-09-01 |
+Second run output:
 
-Note that inflation ends in December 2025 while other series run to 2026 —
-publication lag, exactly what `vintage_date` exists to document.
+```
+eur_usd:                1 rows (from 2026-10-07)
+ecb_policy_rate:        1 rows (from 2026-10-07)
+hicp_euro_area:         1 rows (from 2025-12-02)
+unemployment_euro_area: 1 rows (from 2026-08-02)
+us_cpi:                 1 rows (from 2026-08-02)
+us_fed_funds_rate:      1 rows (from 2026-09-02)
+
+Before:  8209 rows
+Fetched:    6 rows
+After:   8211 rows
+```
+
+Six rows fetched, two actually new. The two daily series picked up genuine
+7 October observations; the four monthly series returned their existing last
+observation, which deduplication removed.
+
+This is worth noting: **some APIs return the latest available observation
+rather than nothing when the requested range is empty.** The incremental logic
+is therefore slightly wasteful, but the result is still correct — which is
+exactly why `drop_duplicates` is a defensive layer and not just housekeeping.
+
+---
+
+## Phase 3 complete
+
+The pipeline now: keeps configuration separate from code, reads three APIs with
+three different response formats, stores results in compressed columnar format,
+records data vintage, fetches only new observations on subsequent runs, and is
+queryable with SQL.
