@@ -7,7 +7,7 @@ dataflow and D.USD.EUR.SP00.A is the series key.
 
 import io
 
-import requests
+from monitor.http import get
 import pandas as pd
 
 BASE_URL = "https://data-api.ecb.europa.eu/service/data"
@@ -23,13 +23,16 @@ def fetch_series(flow, key, start=None):
     if start:
         params["startPeriod"] = start
 
-    response = requests.get(url, params=params, timeout=30)
+    response = get(url, params=params)
 
     # An empty range can come back as 400 or 404; that is not a failure
     if response.status_code in (400, 404):
         return pd.DataFrame(columns=["date", "value", "series_key"])
 
     response.raise_for_status()
+    
+    if not response.text.strip():
+        return pd.DataFrame(columns=["date", "value", "series_key"])
 
     raw = pd.read_csv(io.StringIO(response.text))
 

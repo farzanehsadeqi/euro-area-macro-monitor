@@ -3,7 +3,7 @@
 Dataset codes: https://ec.europa.eu/eurostat/web/main/data/database
 """
 
-import requests
+from monitor.http import get
 import pandas as pd
 
 BASE_URL = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
@@ -19,7 +19,7 @@ def fetch_dataset(dataset, start=None, **filters):
     if start:
         params["sinceTimePeriod"] = start[:7]   # Eurostat wants YYYY-MM
         
-    response = requests.get(url, params=params, timeout=30)
+    response = get(url, params=params)
     response.raise_for_status()
     data = response.json()
 
