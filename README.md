@@ -3,15 +3,15 @@
 Automated ETL pipeline collecting macro and financial indicators from the
 ECB Data Portal, Eurostat, and FRED. Runs daily via GitHub Actions.
 
-**Last updated:** 2026-10-08 12:42 UTC
-**Observations stored:** 8,211
+**Last updated:** 2026-10-09 12:29 UTC
+**Observations stored:** 8,214
 
 ## Indicators
 
 | Series | Source | Frequency | Latest date | Latest value |
 |---|---|---|---|---|
-| `ecb_policy_rate` | ecb | daily | 2026-10-07 | 2.65 |
-| `eur_usd` | ecb | daily | 2026-10-07 | 1.118 |
+| `ecb_policy_rate` | ecb | daily | 2026-10-09 | 2.65 |
+| `eur_usd` | ecb | daily | 2026-10-08 | 1.119 |
 | `hicp_euro_area` | eurostat | monthly | 2025-12-01 | 2 |
 | `unemployment_euro_area` | eurostat | monthly | 2026-08-01 | 6.4 |
 | `us_cpi` | fred | monthly | 2026-08-01 | 334.1 |
