@@ -1,12 +1,23 @@
 # Euro Area Macro Monitor
 
+This data analysis tool visits major economic websites daily to download and organize the latest rates and financial indices, enabling you to use them for market analysis, research, or financial programming. 
 Automated ETL pipeline collecting macro and financial indicators from the
-ECB Data Portal, Eurostat, and FRED. Runs daily via GitHub Actions.
+ECB Data Portal, Eurostat, and FRED. Using GitHub Actions, this program is configured to run automatically every day without manual intervention, ensuring the latest statistics and figures are always kept up to date.
 
-**Last updated:** 2026-10-09 12:29 UTC
+**Last updated:** 2026-10-09 13:38 UTC
 **Observations stored:** 8,214
 
 ## Indicators
+
+Six series covering monetary policy, prices and the exchange rate on both
+sides of the Atlantic.
+
+- `eur_usd` : ECB daily euro reference exchange rate, US dollars per euro
+- `ecb_policy_rate` : ECB main refinancing operations rate, the euro area policy rate
+- `hicp_euro_area` : euro area HICP inflation, annual rate of change in percent
+- `unemployment_euro_area` : euro area unemployment rate, seasonally adjusted
+- `us_cpi` : US Consumer Price Index, all urban consumers, index 1982-84 = 100
+- `us_fed_funds_rate` : US effective federal funds rate, the US policy rate
 
 | Series | Source | Frequency | Latest date | Latest value |
 |---|---|---|---|---|
@@ -37,6 +48,8 @@ published, so later revisions do not silently rewrite history.
 
 ## Running it yourself
 
+You can run the whole pipeline yourself. Clone the repository and run the following:
+
 ```bash
 python -m venv .venv
 source .venv/Scripts/activate      # Windows; use .venv/bin/activate elsewhere
@@ -52,6 +65,11 @@ A FRED API key is free from https://fredaccount.stlouisfed.org/apikeys
 The ECB and Eurostat sources need no key.
 
 ## Charts
+
+One line chart per series, plotted on a linear scale over the full stored
+history. Each series keeps its own vertical scale, so the charts show the
+shape of each indicator.
+Becareful: charts are regenerated on every pipeline run, because they always reflect the data currently in the Parquet. So it would be change daily running! 
 
 ### ecb policy rate
 
@@ -80,4 +98,4 @@ The ECB and Eurostat sources need no key.
 ## Development log
 
 See [docs/setup-log.md](docs/setup-log.md) for the build history, design
-decisions, and problems encountered.
+decisions, and problems you may encounter.
