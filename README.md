@@ -1,4 +1,4 @@
-# Euro Area Macro Monitor
+# Automated data pipeline for macroeconomic KPIs
 
 This data analysis tool visits major economic websites daily to download and organize the latest rates and financial indices, enabling you to use them for market analysis, research, or financial programming. 
 Automated ETL pipeline collecting macro and financial indicators from the
