@@ -1,11 +1,11 @@
-# Automated data pipeline for macroeconomic KPIs
+# Euro Area Macro Monitor
 
 This data analysis tool visits major economic websites daily to download and organize the latest rates and financial indices, enabling you to use them for market analysis, research, or financial programming. 
 Automated ETL pipeline collecting macro and financial indicators from the
 ECB Data Portal, Eurostat, and FRED. Using GitHub Actions, this program is configured to run automatically every day without manual intervention, ensuring the latest statistics and figures are always kept up to date.
 
-**Last updated:** 2026-10-17 10:03 UTC
-**Observations stored:** 8,229
+**Last updated:** 2026-10-18 10:16 UTC
+**Observations stored:** 8,230
 
 ## Indicators
 
@@ -21,7 +21,7 @@ sides of the Atlantic.
 
 | Series | Source | Frequency | Latest date | Latest value |
 |---|---|---|---|---|
-| `ecb_policy_rate` | ecb | daily | 2026-10-17 | 2.65 |
+| `ecb_policy_rate` | ecb | daily | 2026-10-18 | 2.65 |
 | `eur_usd` | ecb | daily | 2026-10-16 | 1.125 |
 | `hicp_euro_area` | eurostat | monthly | 2025-12-01 | 2 |
 | `unemployment_euro_area` | eurostat | monthly | 2026-08-01 | 6.4 |
