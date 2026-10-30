@@ -4,8 +4,8 @@ This data analysis tool visits major economic websites daily to download and org
 Automated ETL pipeline collecting macro and financial indicators from the
 ECB Data Portal, Eurostat, and FRED. Using GitHub Actions, this program is configured to run automatically every day without manual intervention, ensuring the latest statistics and figures are always kept up to date.
 
-**Last updated:** 2026-10-29 12:10 UTC
-**Observations stored:** 8,249
+**Last updated:** 2026-10-30 12:01 UTC
+**Observations stored:** 8,252
 
 ## Indicators
 
@@ -21,10 +21,10 @@ sides of the Atlantic.
 
 | Series | Source | Frequency | Latest date | Latest value |
 |---|---|---|---|---|
-| `ecb_policy_rate` | ecb | daily | 2026-10-29 | 2.65 |
-| `eur_usd` | ecb | daily | 2026-10-28 | 1.113 |
+| `ecb_policy_rate` | ecb | daily | 2026-10-30 | 2.65 |
+| `eur_usd` | ecb | daily | 2026-10-29 | 1.113 |
 | `hicp_euro_area` | eurostat | monthly | 2025-12-01 | 2 |
-| `unemployment_euro_area` | eurostat | monthly | 2026-08-01 | 6.4 |
+| `unemployment_euro_area` | eurostat | monthly | 2026-09-01 | 6.5 |
 | `us_cpi` | fred | monthly | 2026-09-01 | 336.3 |
 | `us_fed_funds_rate` | fred | monthly | 2026-09-01 | 3.75 |
 
